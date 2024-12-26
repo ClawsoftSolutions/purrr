@@ -14,6 +14,7 @@ typedef struct {
   GLFWwindow *window;
   GLFWimage cursors[2];
   purrr_window_callbacks_t callbacks;
+  void *user_ptr;
 } _purrr_window_t;
 
 typedef struct {

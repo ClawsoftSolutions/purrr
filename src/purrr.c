@@ -167,6 +167,18 @@ void purrr_window_set_cursor(purrr_window_t *window, purrr_cursor_t *cursor) {
   glfwSetCursor(internal->window, cursor_handle);
 }
 
+void purrr_window_set_user_ptr(purrr_window_t *window, void *user_ptr) {
+  _purrr_window_t *internal = (_purrr_window_t*)window;
+  assert(internal && internal->window);
+  internal->user_ptr = user_ptr;
+}
+
+void *purrr_window_get_user_ptr(purrr_window_t *window) {
+  _purrr_window_t *internal = (_purrr_window_t*)window;
+  assert(internal && internal->window);
+  return internal->user_ptr;
+}
+
 // cursor
 
 purrr_cursor_t *purrr_cursor_create_standard(purrr_standard_cursor_t type) {

@@ -29,11 +29,18 @@ static struct {
   uint32_t index_count;
 } s_mesh;
 
+static bool s_running = true;
+
 void initialize_mesh(purrr_renderer_t *);
 void cleanup_mesh();
 
 void key_callback(purrr_window_t *window, int key, int scancode, int action, int mods) {
-  printf("Key %d %d %d %d\n", key, scancode, action, mods);
+  if (action != 1) return;
+  if (key == PURRR_KEY_T) {
+    printf("%s\n", (char*)purrr_window_get_user_ptr(window));
+  } else if (key == PURRR_KEY_ESCAPE) {
+    s_running = false; // Why are you running?
+  }
 }
 
 int main(void) {
@@ -54,6 +61,9 @@ int main(void) {
 
   purrr_window_t *window = purrr_window_create(&window_info);
   assert(window);
+
+  char *text = "It is good day to be not dead!";
+  purrr_window_set_user_ptr(window, text);
 
   callbacks->key = &key_callback;
 
@@ -204,7 +214,7 @@ int main(void) {
   purrr_shader_destroy(vertex_shader);
   purrr_shader_destroy(fragment_shader);
 
-  while (!purrr_window_should_close(window)) {
+  while (!purrr_window_should_close(window) && s_running) {
     purrr_renderer_begin_frame(renderer);
 
     purrr_renderer_begin_render_target(renderer, offscreen_render_target);

@@ -247,6 +247,8 @@ bool purrr_window_should_close(purrr_window_t *window);
 void purrr_window_get_size(purrr_window_t *window, uint32_t *width, uint32_t *height);
 void purrr_window_set_icons(purrr_window_t *window, purrr_window_icon_info_t *big, purrr_window_icon_info_t *small);
 void purrr_window_set_cursor(purrr_window_t *window, purrr_cursor_t *cursor);
+void purrr_window_set_user_ptr(purrr_window_t *window, void *user_ptr);
+void *purrr_window_get_user_ptr(purrr_window_t *window);
 
 purrr_cursor_t *purrr_cursor_create_standard(purrr_standard_cursor_t type);
 purrr_cursor_t *purrr_cursor_create(purrr_cursor_info_t *info);
