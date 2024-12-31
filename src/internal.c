@@ -8,6 +8,7 @@
   }
 
 FREE_FUNC(_purrr_sampler_t, sampler)
+FREE_FUNC(_purrr_image_t, image)
 FREE_FUNC(_purrr_texture_t, texture)
 FREE_FUNC(_purrr_pipeline_descriptor_t, pipeline_descriptor)
 FREE_FUNC(_purrr_shader_t, shader)

@@ -1,5 +1,9 @@
 #include "purrr/purrr.h"
 
+/*
+ * Press `escape` to close.
+ */
+
 #include <stdio.h>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -50,6 +54,7 @@ int main(void) {
   purrr_window_callbacks_t *callbacks = NULL;
 
   purrr_window_info_t window_info = {
+    .options = (purrr_window_options_t)(PURRR_WINDOW_OPTION_BORDERLESS | PURRR_WINDOW_OPTION_NOT_RESIZABLE | PURRR_WINDOW_OPTION_TRANSPARENT),
     .api = PURRR_API_VULKAN,
     .title = "purrr example",
     .width = w,
@@ -136,6 +141,17 @@ int main(void) {
 
   initialize_mesh(renderer);
 
+  purrr_image_info_t image_info = {
+    .width  = (uint32_t)w,
+    .height = (uint32_t)h,
+    .format = PURRR_FORMAT_RGBA8RGB,
+  };
+
+  purrr_image_t *image = purrr_image_create(&image_info, renderer);
+  assert(image);
+
+  assert(purrr_image_load(image, pixels, (uint32_t)w, (uint32_t)h));
+
   purrr_sampler_info_t sampler_info = {
     .mag_filter = PURRR_SAMPLER_FILTER_LINEAR,
     .min_filter = PURRR_SAMPLER_FILTER_LINEAR,
@@ -148,68 +164,12 @@ int main(void) {
   assert(sampler);
 
   purrr_texture_info_t texture_info = {
+    .image = image,
     .sampler = sampler,
   };
 
-  purrr_texture_t *texture = NULL;
-
-  texture_info.width  = (uint32_t)w;
-  texture_info.height = (uint32_t)h;
-  texture_info.format = PURRR_FORMAT_RGBA8RGB;
-
-  texture = purrr_texture_create(&texture_info, renderer);
+  purrr_texture_t *texture = purrr_texture_create(&texture_info, renderer);
   assert(texture);
-
-  assert(purrr_texture_load(texture, pixels, (uint32_t)w, (uint32_t)h));
-
-  purrr_pipeline_descriptor_attachment_info_t color_attachments[] = {
-    (purrr_pipeline_descriptor_attachment_info_t){
-      .format = PURRR_FORMAT_RGBA8RGB,
-      .load = false,
-      .store = true,
-      .sampler = sampler,
-    },
-  };
-
-  purrr_pipeline_descriptor_attachment_info_t depth_attachment = {
-    .format = PURRR_FORMAT_DEPTH,
-    .load = false,
-    .store = false,
-    .sampler = sampler
-  };
-
-  purrr_pipeline_descriptor_info_t offscreen_pipeline_descriptor_info = {
-    .color_attachments = color_attachments,
-    .color_attachment_count = 1,
-    .depth_attachment = &depth_attachment,
-  };
-
-  purrr_pipeline_descriptor_t *offscreen_pipeline_descriptor = purrr_pipeline_descriptor_create(&offscreen_pipeline_descriptor_info, renderer);
-  assert(offscreen_pipeline_descriptor);
-
-  purrr_render_target_info_t offscreen_render_target_info = {
-    .pipeline_descriptor = offscreen_pipeline_descriptor,
-    .width = 1920,
-    .height = 1080,
-  };
-
-  purrr_render_target_t *offscreen_render_target = purrr_render_target_create(&offscreen_render_target_info, renderer);
-  assert(offscreen_render_target);
-
-  purrr_pipeline_info_t offscreen_pipeline_info = {
-    .shaders = (purrr_shader_t*[]){ vertex_shader, fragment_shader },
-    .shader_count = 2,
-    .pipeline_descriptor = offscreen_pipeline_descriptor,
-    .mesh_info = (purrr_mesh_binding_info_t){
-      .vertex_infos = vertex_infos,
-      .vertex_info_count = 2,
-    },
-    .descriptor_slots = (purrr_descriptor_type_t[]){ PURRR_DESCRIPTOR_TYPE_TEXTURE },
-    .descriptor_slot_count = 1,
-  };
-
-  purrr_pipeline_t *offscreen_pipeline = purrr_pipeline_create(&offscreen_pipeline_info, renderer);
-  assert(offscreen_pipeline);
 
   purrr_shader_destroy(vertex_shader);
   purrr_shader_destroy(fragment_shader);
@@ -217,9 +177,8 @@ int main(void) {
   while (!purrr_window_should_close(window) && s_running) {
     purrr_renderer_begin_frame(renderer);
 
-    purrr_renderer_begin_render_target(renderer, offscreen_render_target);
-
-    purrr_renderer_bind_pipeline(renderer, offscreen_pipeline);
+    purrr_renderer_begin_render_target(renderer, render_target);
+    purrr_renderer_bind_pipeline(renderer, pipeline);
 
     purrr_renderer_bind_buffer(renderer, s_mesh.vertex_buffer, 0);
     purrr_renderer_bind_buffer(renderer, s_mesh.index_buffer, 0);
@@ -230,27 +189,14 @@ int main(void) {
 
     purrr_renderer_end_render_target(renderer);
 
-    purrr_renderer_begin_render_target(renderer, render_target);
-    purrr_renderer_bind_pipeline(renderer, pipeline);
-    purrr_texture_t *offscreen_texture = purrr_render_target_get_texture(offscreen_render_target, 0);
-    assert(offscreen_texture);
-    purrr_renderer_bind_texture(renderer, offscreen_texture, 0);
-
-    purrr_renderer_draw_indexed(renderer, 1, 0, s_mesh.index_count, 0, 0);
-
-    purrr_renderer_end_render_target(renderer);
-
     purrr_renderer_end_frame(renderer);
     purrr_poll_events();
   }
   purrr_renderer_wait(renderer);
 
-  purrr_pipeline_destroy(offscreen_pipeline);
-  purrr_pipeline_descriptor_destroy(offscreen_pipeline_descriptor);
-  purrr_render_target_destroy(offscreen_render_target);
   cleanup_mesh();
   purrr_sampler_destroy(sampler);
-  purrr_texture_destroy(texture);
+  purrr_image_destroy(image);
   purrr_pipeline_destroy(pipeline);
   purrr_renderer_destroy(renderer);
   purrr_window_destroy(window);

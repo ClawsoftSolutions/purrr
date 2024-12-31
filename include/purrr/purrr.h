@@ -26,12 +26,24 @@ typedef struct purrr_window_s purrr_window_t;
 typedef struct purrr_cursor_s purrr_cursor_t;
 typedef struct purrr_renderer_s purrr_renderer_t;
 typedef struct purrr_sampler_s purrr_sampler_t;
+typedef struct purrr_image_s purrr_image_t;
 typedef struct purrr_texture_s purrr_texture_t;
 typedef struct purrr_pipeline_descriptor_s purrr_pipeline_descriptor_t;
 typedef struct purrr_render_target_s purrr_render_target_t;
 typedef struct purrr_shader_s purrr_shader_t;
 typedef struct purrr_pipeline_s purrr_pipeline_t;
 typedef struct purrr_buffer_s purrr_buffer_t;
+
+// Options
+
+typedef uint32_t purrr_window_options_t;
+
+enum purrr_window_option_e {
+  PURRR_WINDOW_OPTION_NOT_RESIZABLE = (1 << 0),
+  PURRR_WINDOW_OPTION_BORDERLESS    = (1 << 1),
+  PURRR_WINDOW_OPTION_INVISIBLE     = (1 << 2),
+  PURRR_WINDOW_OPTION_TRANSPARENT   = (1 << 3),
+};
 
 // Enums
 
@@ -129,6 +141,8 @@ typedef struct purrr_window_callbacks_s {
 // Infos
 
 typedef struct {
+  purrr_window_options_t options;
+
   uint32_t x, y;
   int32_t width, height;
   const char *title;
@@ -161,16 +175,19 @@ typedef struct {
 } purrr_sampler_info_t;
 
 typedef struct {
-  purrr_sampler_t *sampler;
   uint32_t width, height;
   purrr_format_t format;
+} purrr_image_info_t;
+
+typedef struct {
+  purrr_image_t *image;
+  purrr_sampler_t *sampler;
 } purrr_texture_info_t;
 
 typedef struct {
   purrr_format_t format;
   bool load;
   bool store;
-  purrr_sampler_t *sampler;
 } purrr_pipeline_descriptor_attachment_info_t;
 
 typedef struct {
@@ -257,16 +274,19 @@ void purrr_cursor_destroy(purrr_cursor_t *cursor);
 purrr_sampler_t *purrr_sampler_create(purrr_sampler_info_t *info, purrr_renderer_t *renderer);
 void purrr_sampler_destroy(purrr_sampler_t *sampler);
 
+purrr_image_t *purrr_image_create(purrr_image_info_t *info, purrr_renderer_t *renderer);
+void purrr_image_destroy(purrr_image_t *image);
+bool purrr_image_load(purrr_image_t *dst, uint8_t *src, uint32_t src_width, uint32_t src_height);
+bool purrr_image_copy(purrr_image_t *dst, purrr_image_t *src, uint32_t src_width, uint32_t src_height);
+
 purrr_texture_t *purrr_texture_create(purrr_texture_info_t *info, purrr_renderer_t *renderer);
 void purrr_texture_destroy(purrr_texture_t *texture);
-bool purrr_texture_load(purrr_texture_t *dst, uint8_t *src, uint32_t src_width, uint32_t src_height);
-bool purrr_texture_copy(purrr_texture_t *dst, purrr_texture_t *src, uint32_t src_width, uint32_t src_height);
 
 purrr_pipeline_descriptor_t *purrr_pipeline_descriptor_create(purrr_pipeline_descriptor_info_t *info, purrr_renderer_t *renderer);
 void purrr_pipeline_descriptor_destroy(purrr_pipeline_descriptor_t *pipeline_descriptor);
 
 purrr_render_target_t *purrr_render_target_create(purrr_render_target_info_t *info, purrr_renderer_t *renderer);
-purrr_texture_t *purrr_render_target_get_texture(purrr_render_target_t *render_target, uint32_t texture_index);
+purrr_image_t *purrr_render_target_get_image(purrr_render_target_t *render_target, uint32_t image_index);
 void purrr_render_target_destroy(purrr_render_target_t *render_target);
 
 purrr_shader_t *purrr_shader_create(purrr_shader_info_t *info, purrr_renderer_t *renderer);

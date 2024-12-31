@@ -81,6 +81,11 @@ purrr_window_t *purrr_window_create(purrr_window_info_t *info) {
 
   if (info->callbacks_ptr) *info->callbacks_ptr = &internal->callbacks;
 
+  glfwWindowHint(GLFW_RESIZABLE, !(info->options & PURRR_WINDOW_OPTION_NOT_RESIZABLE));
+  glfwWindowHint(GLFW_DECORATED, !(info->options & PURRR_WINDOW_OPTION_BORDERLESS));
+  glfwWindowHint(GLFW_VISIBLE,   !(info->options & PURRR_WINDOW_OPTION_INVISIBLE));
+  glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, (info->options & PURRR_WINDOW_OPTION_TRANSPARENT));
+
   internal->window = glfwCreateWindow(info->width, info->height, info->title, monitor, NULL);
   if (!internal->window) {
     purrr_window_destroy((purrr_window_t*)internal);
@@ -263,10 +268,58 @@ void purrr_sampler_destroy(purrr_sampler_t *sampler) {
   if (sampler) _purrr_sampler_free((_purrr_sampler_t*)sampler);
 }
 
+// image
+
+purrr_image_t *purrr_image_create(purrr_image_info_t *info, purrr_renderer_t *renderer) {
+  if (!info || info->format >= COUNT_PURRR_FORMATS || info->format == PURRR_FORMAT_UNDEFINED || !renderer) return NULL;
+
+  _purrr_image_t *internal = (_purrr_image_t*)malloc(sizeof(*internal));
+  if (!internal) return NULL;
+  memset(internal, 0, sizeof(*internal));
+  internal->info = *info;
+  internal->renderer = (_purrr_renderer_t*)renderer;
+
+  switch (((_purrr_renderer_t*)renderer)->api) {
+  case PURRR_API_VULKAN: {
+    internal->init = _purrr_image_vulkan_init;
+    internal->cleanup = _purrr_image_vulkan_cleanup;
+    internal->load = _purrr_image_vulkan_load;
+    internal->copy = _purrr_image_vulkan_copy;
+  } break;
+  default: {
+    assert(0 && "Unreachable");
+    return NULL;
+  }
+  }
+
+  if (!internal->init(internal)) {
+    _purrr_image_free(internal);
+    return NULL;
+  }
+
+  return (purrr_image_t*)internal;
+}
+
+void purrr_image_destroy(purrr_image_t *image) {
+  if (image) _purrr_image_free((_purrr_image_t*)image);
+}
+
+bool purrr_image_load(purrr_image_t *dst, uint8_t *src, uint32_t src_width, uint32_t src_height) {
+  _purrr_image_t *internal = (_purrr_image_t*)dst;
+  assert(internal && src && internal->load);
+  return internal->load(internal, src, src_width, src_height);
+}
+
+bool purrr_image_copy(purrr_image_t *dst, purrr_image_t *src, uint32_t src_width, uint32_t src_height) {
+  _purrr_image_t *internal = (_purrr_image_t*)dst;
+  assert(internal && src && internal->copy);
+  return internal->copy(internal, (_purrr_image_t*)src, src_width, src_height);
+}
+
 // texture
 
 purrr_texture_t *purrr_texture_create(purrr_texture_info_t *info, purrr_renderer_t *renderer) {
-  if (!info || !info->sampler || info->format >= COUNT_PURRR_FORMATS || info->format == PURRR_FORMAT_UNDEFINED || !renderer) return NULL;
+  if (!info || !info->image || !info->sampler || !renderer) return NULL;
 
   _purrr_texture_t *internal = (_purrr_texture_t*)malloc(sizeof(*internal));
   if (!internal) return NULL;
@@ -278,8 +331,6 @@ purrr_texture_t *purrr_texture_create(purrr_texture_info_t *info, purrr_renderer
   case PURRR_API_VULKAN: {
     internal->init = _purrr_texture_vulkan_init;
     internal->cleanup = _purrr_texture_vulkan_cleanup;
-    internal->load = _purrr_texture_vulkan_load;
-    internal->copy = _purrr_texture_vulkan_copy;
   } break;
   default: {
     assert(0 && "Unreachable");
@@ -297,18 +348,6 @@ purrr_texture_t *purrr_texture_create(purrr_texture_info_t *info, purrr_renderer
 
 void purrr_texture_destroy(purrr_texture_t *texture) {
   if (texture) _purrr_texture_free((_purrr_texture_t*)texture);
-}
-
-bool purrr_texture_load(purrr_texture_t *dst, uint8_t *src, uint32_t src_width, uint32_t src_height) {
-  _purrr_texture_t *internal = (_purrr_texture_t*)dst;
-  assert(internal && src && internal->load);
-  return internal->load(internal, src, src_width, src_height);
-}
-
-bool purrr_texture_copy(purrr_texture_t *dst, purrr_texture_t *src, uint32_t src_width, uint32_t src_height) {
-  _purrr_texture_t *internal = (_purrr_texture_t*)dst;
-  assert(internal && src && internal->copy);
-  return internal->copy(internal, (_purrr_texture_t*)src, src_width, src_height);
 }
 
 // pipeline descriptor
@@ -443,7 +482,7 @@ purrr_render_target_t *purrr_render_target_create(purrr_render_target_info_t *in
   case PURRR_API_VULKAN: {
     internal->init = _purrr_render_target_vulkan_init;
     internal->cleanup = _purrr_render_target_vulkan_cleanup;
-    internal->get_texture = _purrr_render_target_vulkan_get_texture;
+    internal->get_image = _purrr_render_target_vulkan_get_image;
   } break;
   default: {
     assert(0 && "Unreachable");
@@ -461,11 +500,11 @@ purrr_render_target_t *purrr_render_target_create(purrr_render_target_info_t *in
   return (purrr_render_target_t*)internal;
 }
 
-purrr_texture_t *purrr_render_target_get_texture(purrr_render_target_t *render_target, uint32_t texture_index) {
+purrr_image_t *purrr_render_target_get_image(purrr_render_target_t *render_target, uint32_t image_index) {
   _purrr_render_target_t *internal = (_purrr_render_target_t*)render_target;
-  assert(internal && internal->get_texture);
-  _purrr_texture_t *texture = internal->get_texture(internal, texture_index);
-  return (purrr_texture_t*)texture;
+  assert(internal && internal->get_image);
+  _purrr_image_t *image = internal->get_image(internal, image_index);
+  return (purrr_image_t*)image;
 }
 
 void purrr_render_target_destroy(purrr_render_target_t *render_target) {

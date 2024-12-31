@@ -28,11 +28,15 @@ typedef struct _purrr_sampler_s _purrr_sampler_t;
 typedef bool (*_purrr_sampler_init_t)(_purrr_sampler_t *);
 typedef void (*_purrr_sampler_cleanup_t)(_purrr_sampler_t *);
 
+typedef struct _purrr_image_s _purrr_image_t;
+typedef bool (*_purrr_image_init_t)(_purrr_image_t *);
+typedef void (*_purrr_image_cleanup_t)(_purrr_image_t *);
+typedef bool (*_purrr_image_load_t)(_purrr_image_t *, uint8_t *, uint32_t, uint32_t);
+typedef bool (*_purrr_image_copy_t)(_purrr_image_t *, _purrr_image_t *, uint32_t, uint32_t);
+
 typedef struct _purrr_texture_s _purrr_texture_t;
 typedef bool (*_purrr_texture_init_t)(_purrr_texture_t *);
 typedef void (*_purrr_texture_cleanup_t)(_purrr_texture_t *);
-typedef bool (*_purrr_texture_load_t)(_purrr_texture_t *, uint8_t *, uint32_t, uint32_t);
-typedef bool (*_purrr_texture_copy_t)(_purrr_texture_t *, _purrr_texture_t *, uint32_t, uint32_t);
 
 typedef struct _purrr_pipeline_descriptor_s _purrr_pipeline_descriptor_t;
 typedef bool (*_purrr_pipeline_descriptor_init_t)(_purrr_pipeline_descriptor_t *);
@@ -49,7 +53,7 @@ typedef void (*_purrr_pipeline_cleanup_t)(_purrr_pipeline_t *);
 typedef struct _purrr_render_target_s _purrr_render_target_t;
 typedef bool (*_purrr_render_target_init_t)(_purrr_render_target_t *);
 typedef void (*_purrr_render_target_cleanup_t)(_purrr_render_target_t *);
-typedef _purrr_texture_t *(*_purrr_render_target_get_texture_t)(_purrr_render_target_t *, uint32_t);
+typedef _purrr_image_t *(*_purrr_render_target_get_image_t)(_purrr_render_target_t *, uint32_t);
 
 typedef struct _purrr_buffer_s _purrr_buffer_t;
 typedef bool (*_purrr_buffer_init_t)(_purrr_buffer_t *);
@@ -91,6 +95,28 @@ void _purrr_sampler_free(_purrr_sampler_t *sampler);
 bool _purrr_sampler_vulkan_init(_purrr_sampler_t *sampler);
 void _purrr_sampler_vulkan_cleanup(_purrr_sampler_t *sampler);
 
+// image
+
+struct _purrr_image_s {
+  bool initialized;
+  _purrr_renderer_t *renderer;
+  purrr_image_info_t info;
+
+  _purrr_image_init_t init;
+  _purrr_image_cleanup_t cleanup;
+  _purrr_image_load_t load;
+  _purrr_image_copy_t copy;
+
+  void *data_ptr;
+};
+
+void _purrr_image_free(_purrr_image_t *image);
+
+bool _purrr_image_vulkan_init(_purrr_image_t *image);
+void _purrr_image_vulkan_cleanup(_purrr_image_t *image);
+bool _purrr_image_vulkan_load(_purrr_image_t *dst, uint8_t *src, uint32_t src_width, uint32_t src_height);
+bool _purrr_image_vulkan_copy(_purrr_image_t *dst, _purrr_image_t *src, uint32_t src_width, uint32_t src_height);
+
 // texture
 
 struct _purrr_texture_s {
@@ -98,12 +124,8 @@ struct _purrr_texture_s {
   _purrr_renderer_t *renderer;
   purrr_texture_info_t info;
 
-  uint32_t width, height; // You never can trust user
-
   _purrr_texture_init_t init;
   _purrr_texture_cleanup_t cleanup;
-  _purrr_texture_load_t load;
-  _purrr_texture_copy_t copy;
 
   void *data_ptr;
 };
@@ -112,8 +134,6 @@ void _purrr_texture_free(_purrr_texture_t *texture);
 
 bool _purrr_texture_vulkan_init(_purrr_texture_t *texture);
 void _purrr_texture_vulkan_cleanup(_purrr_texture_t *texture);
-bool _purrr_texture_vulkan_load(_purrr_texture_t *dst, uint8_t *src, uint32_t src_width, uint32_t src_height);
-bool _purrr_texture_vulkan_copy(_purrr_texture_t *dst, _purrr_texture_t *src, uint32_t src_width, uint32_t src_height);
 
 // pipeline descriptor (render pass)
 
@@ -177,15 +197,15 @@ struct _purrr_render_target_s {
   bool initialized;
   _purrr_renderer_t *renderer;
 
-  _purrr_texture_t **textures;
-  uint32_t texture_count;
+  _purrr_image_t **images;
+  uint32_t image_count;
 
   uint32_t width, height;
   _purrr_pipeline_descriptor_t *descriptor;
 
   _purrr_render_target_init_t init;
   _purrr_render_target_cleanup_t cleanup;
-  _purrr_render_target_get_texture_t get_texture;
+  _purrr_render_target_get_image_t get_image;
 
   void *data_ptr;
 };
@@ -194,7 +214,7 @@ void _purrr_render_target_free(_purrr_render_target_t *render_target);
 
 bool _purrr_render_target_vulkan_init(_purrr_render_target_t *render_target);
 void _purrr_render_target_vulkan_cleanup(_purrr_render_target_t *render_target);
-_purrr_texture_t *_purrr_render_target_vulkan_get_texture(_purrr_render_target_t *render_target, uint32_t texture_index);
+_purrr_image_t *_purrr_render_target_vulkan_get_image(_purrr_render_target_t *render_target, uint32_t image_index);
 
 // buffer
 
