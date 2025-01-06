@@ -1,8 +1,5 @@
-add_executable(example main.c)
-target_link_libraries(example purrr)
-
 # https://stackoverflow.com/a/71317698
-add_custom_target(shaders)
+add_custom_target(shaders ALL)
 
 set(HLSL_SHADER_FILES vertex.hlsl fragment.hlsl)
 
@@ -21,16 +18,3 @@ foreach(FILE ${HLSL_SHADER_FILES})
                      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                      VERBATIM)
 endforeach(FILE)
-
-add_custom_target(copy)
-
-file(GLOB_RECURSE COPY_FILES ${CMAKE_CURRENT_SOURCE_DIR}/**.png)
-
-foreach(file ${COPY_FILES})
-  add_custom_command(TARGET copy PRE_BUILD
-                     COMMAND ${CMAKE_COMMAND} -E
-                         copy ${file} ${CMAKE_CURRENT_BINARY_DIR})
-endforeach()
-
-add_dependencies(example shaders)
-add_dependencies(example copy)

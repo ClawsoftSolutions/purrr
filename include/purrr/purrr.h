@@ -83,6 +83,18 @@ typedef enum {
 } purrr_format_t;
 
 typedef enum {
+  PURRR_SAMPLE_COUNT_1 = 0,
+  PURRR_SAMPLE_COUNT_2,
+  PURRR_SAMPLE_COUNT_4,
+  PURRR_SAMPLE_COUNT_8,
+  PURRR_SAMPLE_COUNT_16,
+  PURRR_SAMPLE_COUNT_32,
+  PURRR_SAMPLE_COUNT_64,
+
+  COUNT_PURRR_SAMPLE_COUNTS
+} purrr_sample_count_t;
+
+typedef enum {
   PURRR_SAMPLER_FILTER_NEAREST = 0,
   PURRR_SAMPLER_FILTER_LINEAR,
   COUNT_PURRR_SAMPLER_FILTERS
@@ -177,6 +189,7 @@ typedef struct {
 typedef struct {
   uint32_t width, height;
   purrr_format_t format;
+  purrr_sample_count_t sample_count;
 } purrr_image_info_t;
 
 typedef struct {
@@ -188,10 +201,13 @@ typedef struct {
   purrr_format_t format;
   bool load;
   bool store;
+  bool present_src; // Set to true if it's a swapchain image.
+  purrr_sample_count_t sample_count;
 } purrr_pipeline_descriptor_attachment_info_t;
 
 typedef struct {
   purrr_pipeline_descriptor_attachment_info_t *color_attachments;
+  purrr_pipeline_descriptor_attachment_info_t *resolve_attachments;
   uint32_t color_attachment_count;
   purrr_pipeline_descriptor_attachment_info_t *depth_attachment;
 } purrr_pipeline_descriptor_info_t;
@@ -199,6 +215,7 @@ typedef struct {
 typedef struct {
   purrr_pipeline_descriptor_t *pipeline_descriptor;
   uint32_t width, height;
+  purrr_image_t **images;
 } purrr_render_target_info_t;
 
 typedef struct {
@@ -238,6 +255,8 @@ typedef struct {
 
   purrr_pipeline_push_constant_t *push_constants;
   uint32_t push_constant_count;
+
+  purrr_sample_count_t sample_count;
 } purrr_pipeline_info_t;
 
 typedef struct {
@@ -248,12 +267,11 @@ typedef struct {
 typedef struct {
   purrr_window_t *window;
   bool vsync;
+  uint32_t image_count;
 
   // Can be null I think
   purrr_format_t *swapchain_format;
-  purrr_pipeline_descriptor_t **swapchain_pipeline_descriptor;
-  purrr_render_target_t **swapchain_render_targets[2];
-  purrr_render_target_t **swapchain_render_target;
+  purrr_image_t ***swapchain_images;
 } purrr_renderer_info_t;
 
 // Functions
@@ -313,7 +331,9 @@ void  purrr_renderer_set_user_pointer(purrr_renderer_t *renderer, void *ptr);
 
 void purrr_renderer_set_resize_callback(purrr_renderer_t *renderer, purrr_renderer_resize_cb cb);
 
-void purrr_renderer_begin_frame(purrr_renderer_t *renderer);
+uint32_t purrr_renderer_get_sample_counts(purrr_renderer_t *renderer, purrr_sample_count_t **array);
+
+void purrr_renderer_begin_frame(purrr_renderer_t *renderer, uint32_t *image_index);
 void purrr_renderer_begin_render_target(purrr_renderer_t *renderer, purrr_render_target_t *render_target);
 void purrr_renderer_bind_pipeline(purrr_renderer_t *renderer, purrr_pipeline_t *pipeline);
 void purrr_renderer_bind_texture(purrr_renderer_t *renderer, purrr_texture_t *texture, uint32_t slot_index);

@@ -117,25 +117,22 @@ typedef struct {
 
   VkCommandPool command_pool;
 
-  _purrr_render_target_t *render_targets[2];
-  _purrr_pipeline_descriptor_t *pipeline_descriptor;
-
   // Swapchain
   VkSurfaceFormatKHR swapchain_format;
   VkPresentModeKHR swapchain_present_mode;
   VkExtent2D swapchain_extent;
   VkSwapchainKHR swapchain;
-  VkImage swapchain_images[2];
-  VkImageView swapchain_image_views[2];
+  VkImage *swapchain_images;
+  VkImageView *swapchain_image_views;
 
   uint32_t image_index;
   uint32_t frame_index;
-  VkCommandBuffer render_cmd_bufs[2];
+  VkCommandBuffer *render_cmd_bufs;
   VkCommandBuffer active_cmd_buf;
 
-  VkSemaphore image_semaphores[2];
-  VkSemaphore render_semaphores[2];
-  VkFence flight_fences[2];
+  VkSemaphore *image_semaphores;
+  VkSemaphore *render_semaphores;
+  VkFence *flight_fences;
 
   _purrr_render_target_t *active_render_target;
   _purrr_pipeline_t *active_pipeline;
@@ -239,6 +236,7 @@ bool _purrr_renderer_vulkan_find_queue_families(VkSurfaceKHR surface, VkPhysical
   uint32_t queueFamilyCount = 0;
   vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, VK_NULL_HANDLE);
   VkQueueFamilyProperties *queueFamilies = (VkQueueFamilyProperties*)malloc(sizeof(*queueFamilies)*queueFamilyCount);
+  assert(queueFamilies);
   vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies);
 
   uint32_t g = UINT32_MAX;
@@ -280,6 +278,7 @@ static _purrr_renderer_vulkan_swapchain_details_t _purrr_renderer_vulkan_request
     vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &details.format_count, VK_NULL_HANDLE);
     if (details.format_count > 0) {
       details.formats = (VkSurfaceFormatKHR*)malloc(sizeof(*details.formats)*details.format_count);
+      assert(details.formats);
       vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &details.format_count, details.formats);
     }
   }
@@ -288,6 +287,7 @@ static _purrr_renderer_vulkan_swapchain_details_t _purrr_renderer_vulkan_request
     vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &details.present_mode_count, VK_NULL_HANDLE);
     if (details.present_mode_count > 0) {
       details.present_modes = (VkPresentModeKHR*)malloc(sizeof(*details.present_modes)*details.present_mode_count);
+      assert(details.present_modes);
       vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &details.present_mode_count, details.present_modes);
     }
   }
@@ -441,6 +441,7 @@ bool _purrr_renderer_vulkan_create_buffer(_purrr_renderer_data_t *data, VkDevice
 bool _purrr_sampler_vulkan_init(_purrr_sampler_t *sampler) {
   if (!sampler || !sampler->renderer || !sampler->renderer->initialized) return false;
   _purrr_sampler_data_t *data = (_purrr_sampler_data_t*)malloc(sizeof(*data));
+  assert(data);
   memset(data, 0, sizeof(*data));
 
   _purrr_renderer_data_t *renderer_data = (_purrr_renderer_data_t*)sampler->renderer->data_ptr;
@@ -491,6 +492,7 @@ void _purrr_sampler_vulkan_cleanup(_purrr_sampler_t *sampler) {
 bool _purrr_image_vulkan_init(_purrr_image_t *image) {
   if (!image || !image->renderer || !image->renderer->initialized) return false;
   _purrr_image_data_t *data = (_purrr_image_data_t*)malloc(sizeof(*data));
+  assert(data);
   memset(data, 0, sizeof(*data));
 
   _purrr_renderer_data_t *renderer_data = (_purrr_renderer_data_t*)image->renderer->data_ptr;
@@ -518,7 +520,7 @@ bool _purrr_image_vulkan_init(_purrr_image_t *image) {
       },
       1, // TODO: Implement, I forgot what it was an am too lazy to check :p
       1,
-      VK_SAMPLE_COUNT_1_BIT, // TODO: Implement
+      (VkSampleCountFlagBits)1<<image->info.sample_count,
       VK_IMAGE_TILING_OPTIMAL, // TODO: Add an option for tiling (if needed)
       (VkImageUsageFlags)(usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT),
       VK_SHARING_MODE_EXCLUSIVE,
@@ -630,6 +632,7 @@ bool _purrr_image_vulkan_copy(_purrr_image_t *dst, _purrr_image_t *src, uint32_t
 bool _purrr_texture_vulkan_init(_purrr_texture_t *texture) {
   if (!texture || !texture->renderer || !texture->renderer->initialized) return false;
   _purrr_texture_data_t *data = (_purrr_texture_data_t*)malloc(sizeof(*data));
+  assert(data);
   memset(data, 0, sizeof(*data));
 
   _purrr_image_data_t *image_data = (_purrr_image_data_t*)((_purrr_image_t*)texture->info.image)->data_ptr;
@@ -684,7 +687,7 @@ void _purrr_texture_vulkan_cleanup(_purrr_texture_t *texture) {
   _purrr_texture_data_t *data = (_purrr_texture_data_t*)texture->data_ptr;
   _purrr_renderer_data_t *renderer_data = (_purrr_renderer_data_t*)texture->renderer->data_ptr;
   assert(data && renderer_data);
-  
+
 }
 
 // pipeline descriptor
@@ -697,30 +700,55 @@ bool _purrr_pipeline_descriptor_vulkan_init(_purrr_pipeline_descriptor_t *pipeli
   assert(data && renderer_data);
 
   {
-    uint32_t attachment_count = pipeline_descriptor->info.color_attachment_count+(pipeline_descriptor->info.depth_attachment?1:0);
+    uint8_t resolve_multiplier = pipeline_descriptor->info.resolve_attachments?2:1;
+    uint32_t attachment_count = (pipeline_descriptor->info.color_attachment_count*resolve_multiplier)+(pipeline_descriptor->info.depth_attachment?1:0);
     VkAttachmentDescription *attachments = (VkAttachmentDescription*)malloc(sizeof(*attachments) * attachment_count);
-    VkAttachmentReference *color_references = (VkAttachmentReference*)malloc(sizeof(*color_references) * pipeline_descriptor->info.color_attachment_count);
+    assert(attachments);
+    VkAttachmentReference *references = (VkAttachmentReference*)malloc(sizeof(*references) * pipeline_descriptor->info.color_attachment_count * resolve_multiplier);
+    assert(references);
 
     bool depth = false;
     VkAttachmentReference depth_reference = {0};
 
-    for (uint32_t i = 0; i < pipeline_descriptor->info.color_attachment_count; ++i) {
+    uint32_t i = 0;
+    for (; i < pipeline_descriptor->info.color_attachment_count; ++i) {
       purrr_pipeline_descriptor_attachment_info_t attachment_info = pipeline_descriptor->info.color_attachments[i];
       attachments[i] = (VkAttachmentDescription){
         0,
         vk_format(renderer_data, attachment_info.format),
-        VK_SAMPLE_COUNT_1_BIT, // TODO:
+        (VkSampleCountFlagBits)1<<attachment_info.sample_count,
         (attachment_info.load?VK_ATTACHMENT_LOAD_OP_LOAD:VK_ATTACHMENT_LOAD_OP_CLEAR),
         (attachment_info.store?VK_ATTACHMENT_STORE_OP_STORE:VK_ATTACHMENT_STORE_OP_DONT_CARE),
         VK_ATTACHMENT_LOAD_OP_DONT_CARE,
         VK_ATTACHMENT_STORE_OP_DONT_CARE,
         VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        (attachment_info.present_src?VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:((resolve_multiplier>1)?VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)),
       };
 
-      color_references[i] = (VkAttachmentReference){
+      references[i] = (VkAttachmentReference){
         i, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
       };
+    }
+
+    if (pipeline_descriptor->info.resolve_attachments) {
+      for (uint32_t j = 0; j < pipeline_descriptor->info.color_attachment_count; ++j, ++i) {
+        purrr_pipeline_descriptor_attachment_info_t attachment_info = pipeline_descriptor->info.resolve_attachments[j];
+        attachments[i] = (VkAttachmentDescription){
+          0,
+          vk_format(renderer_data, attachment_info.format),
+          (VkSampleCountFlagBits)1<<attachment_info.sample_count,
+          (attachment_info.load?VK_ATTACHMENT_LOAD_OP_LOAD:VK_ATTACHMENT_LOAD_OP_CLEAR),
+          (attachment_info.store?VK_ATTACHMENT_STORE_OP_STORE:VK_ATTACHMENT_STORE_OP_DONT_CARE),
+          VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+          VK_ATTACHMENT_STORE_OP_DONT_CARE,
+          VK_IMAGE_LAYOUT_UNDEFINED,
+          (attachment_info.present_src?VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+        };
+
+        references[i] = (VkAttachmentReference){
+          i, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        };
+      }
     }
 
     if (pipeline_descriptor->info.depth_attachment) {
@@ -731,7 +759,7 @@ bool _purrr_pipeline_descriptor_vulkan_init(_purrr_pipeline_descriptor_t *pipeli
       attachments[depth_reference.attachment] = (VkAttachmentDescription){
         0,
         vk_format(renderer_data, attachment_info.format),
-        VK_SAMPLE_COUNT_1_BIT, // TODO:
+        (VkSampleCountFlagBits)1<<attachment_info.sample_count,
         (attachment_info.load?VK_ATTACHMENT_LOAD_OP_LOAD:VK_ATTACHMENT_LOAD_OP_CLEAR),
         (attachment_info.store?VK_ATTACHMENT_STORE_OP_STORE:VK_ATTACHMENT_STORE_OP_DONT_CARE),
         VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -745,7 +773,8 @@ bool _purrr_pipeline_descriptor_vulkan_init(_purrr_pipeline_descriptor_t *pipeli
     VkSubpassDescription subpass = {
       .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
       .colorAttachmentCount = pipeline_descriptor->info.color_attachment_count,
-      .pColorAttachments = color_references,
+      .pColorAttachments = references,
+      .pResolveAttachments = references+pipeline_descriptor->info.color_attachment_count,
       .pDepthStencilAttachment = (depth?&depth_reference:NULL),
     };
 
@@ -815,6 +844,7 @@ bool _purrr_shader_vulkan_init(_purrr_shader_t *shader) {
     shader->info.buffer_size = (size_t)ftell(fd);
     fseek(fd, 0, SEEK_SET);
     shader->info.buffer = malloc(shader->info.buffer_size);
+    assert(shader->info.buffer);
     if ((shader->info.buffer_size % 4) != 0 || !shader->info.buffer ||
         (fread(shader->info.buffer, shader->info.buffer_size, 1, fd) != 1)) {
       fclose(fd);
@@ -866,6 +896,7 @@ bool _purrr_pipeline_vulkan_init(_purrr_pipeline_t *pipeline) {
   memset(data, 0, sizeof(*data));
 
   VkPipelineShaderStageCreateInfo *stage_infos = (VkPipelineShaderStageCreateInfo*)malloc(sizeof(*stage_infos)*pipeline->info.shader_count);
+  assert(stage_infos);
   for (uint32_t i = 0; i < pipeline->info.shader_count; ++i) {
     _purrr_shader_t *shader = (_purrr_shader_t*)pipeline->info.shaders[i];
     assert(shader->initialized);
@@ -896,6 +927,7 @@ bool _purrr_pipeline_vulkan_init(_purrr_pipeline_t *pipeline) {
   };
 
   VkVertexInputAttributeDescription *vertex_attributes = (vertex_attrib_count>0?(VkVertexInputAttributeDescription*)malloc(sizeof(*vertex_attributes)*vertex_attrib_count):VK_NULL_HANDLE);
+  assert(vertex_attributes);
   uint32_t vertex_size = 0;
   for (uint32_t i = 0; i < vertex_attrib_count; ++i) {
     purrr_vertex_info_t info = pipeline->info.mesh_info.vertex_infos[i];
@@ -945,7 +977,7 @@ bool _purrr_pipeline_vulkan_init(_purrr_pipeline_t *pipeline) {
   VkPipelineMultisampleStateCreateInfo multisampling = {
     .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     .sampleShadingEnable = VK_FALSE,
-    .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    .rasterizationSamples = (VkSampleCountFlagBits)1<<pipeline->info.sample_count,
   };
 
   VkPipelineColorBlendAttachmentState color_blend_attachment = {
@@ -978,6 +1010,7 @@ bool _purrr_pipeline_vulkan_init(_purrr_pipeline_t *pipeline) {
   };
 
   VkDescriptorSetLayout *layouts = (VkDescriptorSetLayout*)malloc(sizeof(*layouts)*pipeline->info.descriptor_slot_count);
+  assert(layouts);
   for (uint32_t i = 0; i < pipeline->info.descriptor_slot_count; ++i) {
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     switch (pipeline->info.descriptor_slots[i]) {
@@ -999,6 +1032,7 @@ bool _purrr_pipeline_vulkan_init(_purrr_pipeline_t *pipeline) {
   }
 
   VkPushConstantRange *pc_ranges = (VkPushConstantRange*)malloc(sizeof(*pc_ranges)*pipeline->info.push_constant_count);
+  assert(pc_ranges);
   for (size_t i = 0; i < pipeline->info.push_constant_count; ++i) {
     pc_ranges[i] = (VkPushConstantRange){
       .stageFlags = VK_SHADER_STAGE_ALL,
@@ -1073,40 +1107,66 @@ bool _purrr_render_target_vulkan_init(_purrr_render_target_t *render_target) {
   _purrr_pipeline_descriptor_data_t *pipeline_descriptor_data = (_purrr_pipeline_descriptor_data_t*)pipeline_descriptor->data_ptr;
   assert(pipeline_descriptor_data);
 
-  render_target->image_count = pipeline_descriptor->info.color_attachment_count+(pipeline_descriptor->info.depth_attachment?1:0);
-  render_target->images = (_purrr_image_t**)malloc(sizeof(render_target->images)*render_target->image_count);
+  render_target->image_count = pipeline_descriptor->info.color_attachment_count*(pipeline_descriptor->info.resolve_attachments?2:1)+(pipeline_descriptor->info.depth_attachment?1:0);
 
   VkImageView *views = (VkImageView*)malloc(sizeof(*views)*render_target->image_count);
-  if (!views) return false;
+  assert(views);
 
-  uint32_t i = 0;
-  for (; i < pipeline_descriptor->info.color_attachment_count; ++i) {
-    purrr_pipeline_descriptor_attachment_info_t attachment_info = pipeline_descriptor->info.color_attachments[i];
-    purrr_image_info_t info = {
-      .width = render_target->width,
-      .height = render_target->height,
-      .format = attachment_info.format,
-    };
+  if (render_target->info.images) {
+    for (uint32_t i = 0; i < render_target->image_count; ++i) {
+      purrr_image_t *image = render_target->info.images[i];
+      assert(image);
+      views[i] = ((_purrr_image_data_t*)(((_purrr_image_t*)image)->data_ptr))->image_view;
+    }
+  } else {
+    render_target->images = (_purrr_image_t**)malloc(sizeof(render_target->images)*render_target->image_count);
+    assert(render_target->images);
 
-    _purrr_image_t *image = (_purrr_image_t*)purrr_image_create(&info, (purrr_renderer_t*)render_target->renderer);
-    if (!image) return false;
-    render_target->images[i] = image;
-    views[i] = ((_purrr_image_data_t*)image->data_ptr)->image_view;
+    uint32_t i = 0;
+    for (; i < pipeline_descriptor->info.color_attachment_count; ++i) {
+      purrr_pipeline_descriptor_attachment_info_t attachment_info = pipeline_descriptor->info.color_attachments[i];
+      purrr_image_info_t info = {
+        .width = render_target->width,
+        .height = render_target->height,
+        .format = attachment_info.format,
+        .sample_count = attachment_info.sample_count,
+      };
+
+      _purrr_image_t *image = (_purrr_image_t*)purrr_image_create(&info, (purrr_renderer_t*)render_target->renderer);
+      if (!image) return false;
+      render_target->images[i] = image;
+      views[i] = ((_purrr_image_data_t*)image->data_ptr)->image_view;
+    }
+    if (pipeline_descriptor->info.resolve_attachments) {
+      for (uint32_t j = 0; j < pipeline_descriptor->info.color_attachment_count; ++j, ++i) {
+        purrr_pipeline_descriptor_attachment_info_t attachment_info = pipeline_descriptor->info.resolve_attachments[i];
+        purrr_image_info_t info = {
+          .width = render_target->width,
+          .height = render_target->height,
+          .format = attachment_info.format,
+        };
+
+        _purrr_image_t *image = (_purrr_image_t*)purrr_image_create(&info, (purrr_renderer_t*)render_target->renderer);
+        if (!image) return false;
+        render_target->images[i] = image;
+        views[i] = ((_purrr_image_data_t*)image->data_ptr)->image_view;
+      }
+    }
+    if (i < render_target->image_count) { // depth I think
+      purrr_pipeline_descriptor_attachment_info_t attachment_info = *pipeline_descriptor->info.depth_attachment;
+      purrr_image_info_t info = {
+        .width = render_target->width,
+        .height = render_target->height,
+        .format = attachment_info.format,
+      };
+
+      _purrr_image_t *image = (_purrr_image_t*)purrr_image_create(&info, (purrr_renderer_t*)render_target->renderer);
+      if (!image) return false;
+      render_target->images[i] = image;
+      views[i++] = ((_purrr_image_data_t*)image->data_ptr)->image_view;
+    }
+    assert(i == render_target->image_count);
   }
-  if (i < render_target->image_count) { // depth I think
-    purrr_pipeline_descriptor_attachment_info_t attachment_info = *pipeline_descriptor->info.depth_attachment;
-    purrr_image_info_t info = {
-      .width = render_target->width,
-      .height = render_target->height,
-      .format = attachment_info.format,
-    };
-
-    _purrr_image_t *image = (_purrr_image_t*)purrr_image_create(&info, (purrr_renderer_t*)render_target->renderer);
-    if (!image) return false;
-    render_target->images[i] = image;
-    views[i++] = ((_purrr_image_data_t*)image->data_ptr)->image_view;
-  }
-  assert(i == render_target->image_count);
 
   {
     VkFramebufferCreateInfo framebuffer_info = {
@@ -1329,12 +1389,10 @@ bool _purrr_renderer_create_swapchain(_purrr_renderer_t *renderer) {
       };
     }
 
-    uint32_t image_count = 2;
-
     VkSwapchainCreateInfoKHR createInfo = {0};
     createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.surface = data->surface;
-    createInfo.minImageCount = image_count;
+    createInfo.minImageCount = renderer->info.image_count;
     createInfo.imageFormat = data->swapchain_format.format;
     createInfo.imageColorSpace = data->swapchain_format.colorSpace;
     createInfo.imageExtent = data->swapchain_extent;
@@ -1356,7 +1414,11 @@ bool _purrr_renderer_create_swapchain(_purrr_renderer_t *renderer) {
 
     if (vkCreateSwapchainKHR(data->device, &createInfo, VK_NULL_HANDLE, &data->swapchain) != VK_SUCCESS) return false;
 
-    vkGetSwapchainImagesKHR(data->device, data->swapchain, &image_count, data->swapchain_images);
+    if (!data->swapchain_images) {
+      data->swapchain_images = (VkImage*)malloc(sizeof(*data->swapchain_images) * renderer->info.image_count);
+      assert(data->swapchain_images);
+    }
+    vkGetSwapchainImagesKHR(data->device, data->swapchain, &renderer->info.image_count, data->swapchain_images);
   }
 
   {
@@ -1374,7 +1436,11 @@ bool _purrr_renderer_create_swapchain(_purrr_renderer_t *renderer) {
     createInfo.subresourceRange.baseArrayLayer = 0;
     createInfo.subresourceRange.layerCount = 1;
 
-    for (uint8_t i = 0; i < 2; i++) {
+    if (!data->swapchain_image_views) {
+      data->swapchain_image_views = (VkImageView*)malloc(sizeof(*data->swapchain_image_views) * renderer->info.image_count);
+      assert(data->swapchain_image_views);
+    }
+    for (uint8_t i = 0; i < renderer->info.image_count; i++) {
       _purrr_vulkan_transition_image_layout(data, data->swapchain_images[i], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0, VK_ACCESS_MEMORY_READ_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
       createInfo.image = data->swapchain_images[i];
       if (vkCreateImageView(data->device, &createInfo, VK_NULL_HANDLE, &data->swapchain_image_views[i]) != VK_SUCCESS) return false;
@@ -1383,84 +1449,34 @@ bool _purrr_renderer_create_swapchain(_purrr_renderer_t *renderer) {
 
   if (renderer->info.swapchain_format) *renderer->info.swapchain_format = purrr_format(data->swapchain_format.format);
 
-  {
-    VkAttachmentDescription attachment_description = {
-      .format = data->swapchain_format.format,
-      .samples = VK_SAMPLE_COUNT_1_BIT,
-      .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-      .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-      .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-      .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-      .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-      .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-    };
+  if (renderer->info.swapchain_images) {
+    *renderer->info.swapchain_images = (purrr_image_t**)malloc(sizeof(**renderer->info.swapchain_images) * renderer->info.image_count);
+    assert(*renderer->info.swapchain_images);
+    purrr_image_t **ptr = *renderer->info.swapchain_images;
+    for (uint32_t i = 0; i < renderer->info.image_count; ++i) {
+      _purrr_image_data_t *internal_image_data = (_purrr_image_data_t*)malloc(sizeof(*internal_image_data));
+      assert(internal_image_data);
+      internal_image_data->image = data->swapchain_images[i];
+      internal_image_data->image_view = data->swapchain_image_views[i];
 
-    VkAttachmentReference attachment_reference = {
-      .attachment = 0,
-      .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    };
+      _purrr_image_t *internal_image = (_purrr_image_t*)malloc(sizeof(_purrr_image_t));
+      assert(internal_image);
+      *internal_image = (_purrr_image_t){
+        .initialized = true,
+        .renderer = renderer,
+        .info = (purrr_image_info_t){
+          .width = data->swapchain_extent.width,
+          .height = data->swapchain_extent.height,
+          .format = PURRR_FORMAT_UNDEFINED,
+        },
+        .cleanup = _purrr_image_vulkan_cleanup,
+        .copy = _purrr_image_vulkan_copy,
+        .data_ptr = internal_image_data,
+      };
 
-    VkSubpassDescription subpass = {
-      .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-      .colorAttachmentCount = 1,
-      .pColorAttachments = &attachment_reference,
-    };
-
-    VkRenderPassCreateInfo create_info = {
-      .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-      .attachmentCount = 1,
-      .pAttachments = &attachment_description,
-      .subpassCount = 1,
-      .pSubpasses = &subpass,
-    };
-
-    _purrr_pipeline_descriptor_t *descriptor = (_purrr_pipeline_descriptor_t*)malloc(sizeof(*descriptor));
-    descriptor->renderer = renderer;
-    descriptor->data_ptr = (_purrr_pipeline_descriptor_data_t*)malloc(sizeof(_purrr_pipeline_descriptor_data_t));
-    if (vkCreateRenderPass(data->device, &create_info, VK_NULL_HANDLE, &((_purrr_pipeline_descriptor_data_t*)descriptor->data_ptr)->render_pass) != VK_SUCCESS) return false;
-    descriptor->info = (purrr_pipeline_descriptor_info_t){0};
-    descriptor->info.color_attachment_count = 1;
-    descriptor->initialized = true;
-
-    data->pipeline_descriptor = descriptor;
-    if (renderer->info.swapchain_pipeline_descriptor) *renderer->info.swapchain_pipeline_descriptor = (purrr_pipeline_descriptor_t*)data->pipeline_descriptor;
+      *(ptr++) = (purrr_image_t*)internal_image;
+    }
   }
-
-  for (uint32_t i = 0; i < 2; ++i) {
-    _purrr_render_target_t *render_target = (_purrr_render_target_t*)malloc(sizeof(*render_target));
-    if (!render_target) return false;
-    memset(render_target, 0, sizeof(*render_target));
-    render_target->renderer = renderer;
-    render_target->width = data->swapchain_extent.width;
-    render_target->height = data->swapchain_extent.height;
-    render_target->descriptor = data->pipeline_descriptor;
-    render_target->cleanup = _purrr_render_target_vulkan_cleanup;
-
-    _purrr_render_target_data_t *rt_data = (_purrr_render_target_data_t*)malloc(sizeof(*data));
-
-    VkFramebufferCreateInfo create_info = {
-      VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, VK_NULL_HANDLE, 0,
-      ((_purrr_pipeline_descriptor_data_t*)data->pipeline_descriptor->data_ptr)->render_pass,
-      1,
-      NULL,
-      render_target->width,
-      render_target->height,
-      1,
-    };
-
-    render_target->image_count = 1;
-    create_info.pAttachments = &data->swapchain_image_views[i];
-
-    if (vkCreateFramebuffer(data->device, &create_info, VK_NULL_HANDLE, &rt_data->framebuffer) != VK_SUCCESS) return false;
-
-    render_target->data_ptr = rt_data;
-    render_target->initialized = true;
-
-    data->render_targets[i] = render_target;
-  }
-
-  if (renderer->info.swapchain_render_targets) *renderer->info.swapchain_render_targets = (purrr_render_target_t**)data->render_targets;
-  if (renderer->info.swapchain_render_target) *renderer->info.swapchain_render_target = NULL;
 
   return true;
 }
@@ -1472,15 +1488,8 @@ void _purrr_renderer_cleanup_swapchain(_purrr_renderer_t *renderer) {
   assert(data);
   vkDestroySwapchainKHR(data->device, data->swapchain, VK_NULL_HANDLE);
 
-  for (uint8_t i = 0; i < 2; ++i)
+  for (uint8_t i = 0; i < renderer->info.image_count; ++i)
     vkDestroyImageView(data->device, data->swapchain_image_views[i], VK_NULL_HANDLE);
-
-  _purrr_pipeline_descriptor_vulkan_cleanup(data->pipeline_descriptor);
-  free(data->pipeline_descriptor);
-  for (uint8_t i = 0; i < 2; ++i) {
-    _purrr_render_target_vulkan_cleanup(data->render_targets[i]);
-    free(data->render_targets[i]);
-  }
 }
 
 bool _purrr_renderer_recreate_swapchain(_purrr_renderer_t *renderer) {
@@ -1500,7 +1509,7 @@ bool _purrr_renderer_recreate_swapchain(_purrr_renderer_t *renderer) {
   _purrr_renderer_cleanup_swapchain(renderer);
   if (!_purrr_renderer_create_swapchain(renderer)) return false;
 
-  if (renderer->callbacks.resize) renderer->callbacks.resize(renderer->user_ptr);
+  if (renderer->callbacks.resize) renderer->callbacks.resize((purrr_renderer_t*)renderer);
 
   return true;
 }
@@ -1510,6 +1519,7 @@ bool _purrr_renderer_recreate_swapchain(_purrr_renderer_t *renderer) {
 bool _purrr_renderer_vulkan_init(_purrr_renderer_t *renderer) {
   if (!renderer || !glfwVulkanSupported()) return false;
   _purrr_renderer_data_t *data = (_purrr_renderer_data_t*)malloc(sizeof(*data));
+  assert(data);
   memset(data, 0, sizeof(*data));
 
   {
@@ -1519,14 +1529,16 @@ bool _purrr_renderer_vulkan_init(_purrr_renderer_t *renderer) {
     { // Load GLFW extensions
       uint32_t count = 0;
       const char **glfw_extensions = glfwGetRequiredInstanceExtensions(&count);
-      extensions.items = (const char **)malloc(sizeof(*extensions.items)*(extensions.capacity = (count + 1)));
       extensions.count = count;
+      extensions.items = (const char **)malloc(sizeof(*extensions.items)*(extensions.capacity = (count + 1)));
+      assert(extensions.items);
       memcpy(extensions.items, glfw_extensions, sizeof(*glfw_extensions)*count);
     }
 
     #ifdef PURRR_DEBUG
       extensions.items[extensions.count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
       layers.items = malloc(sizeof(*layers.items)*8);
+      assert(layers.items);
       layers.items[layers.count++] = "VK_LAYER_KHRONOS_validation";
     #endif // PURRR_DEBUG
 
@@ -1554,6 +1566,7 @@ bool _purrr_renderer_vulkan_init(_purrr_renderer_t *renderer) {
     vkEnumeratePhysicalDevices(data->instance, &deviceCount, VK_NULL_HANDLE);
     if (deviceCount == 0) return false;
     VkPhysicalDevice *devices = (VkPhysicalDevice*)malloc(sizeof(VkPhysicalDevice)*deviceCount);
+    assert(devices);
     vkEnumeratePhysicalDevices(data->instance, &deviceCount, devices);
 
     uint32_t best_score = 0;
@@ -1628,9 +1641,11 @@ bool _purrr_renderer_vulkan_init(_purrr_renderer_t *renderer) {
       .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
       .commandPool = data->command_pool,
       .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-      .commandBufferCount = 2,
+      .commandBufferCount = renderer->info.image_count,
     };
 
+    data->render_cmd_bufs = (VkCommandBuffer*)malloc(sizeof(*data->render_cmd_bufs) * renderer->info.image_count);
+    assert(data->render_cmd_bufs);
     if (vkAllocateCommandBuffers(data->device, &alloc_info, data->render_cmd_bufs) != VK_SUCCESS) return false;
   }
 
@@ -1644,7 +1659,12 @@ bool _purrr_renderer_vulkan_init(_purrr_renderer_t *renderer) {
       .flags = VK_FENCE_CREATE_SIGNALED_BIT,
     };
 
-    for (uint8_t i = 0; i < 2; ++i) {
+    data->image_semaphores  = (VkSemaphore*)malloc(sizeof(*data->image_semaphores)*renderer->info.image_count);
+    data->render_semaphores = (VkSemaphore*)malloc(sizeof(*data->render_semaphores)*renderer->info.image_count);
+    data->flight_fences     = (VkFence*)malloc(sizeof(*data->flight_fences)*renderer->info.image_count);
+    assert(data->image_semaphores && data->render_semaphores && data->flight_fences);
+
+    for (uint8_t i = 0; i < renderer->info.image_count; ++i) {
         if (vkCreateSemaphore(data->device, &semaphore_info, VK_NULL_HANDLE, &data->image_semaphores[i]) != VK_SUCCESS ||
             vkCreateSemaphore(data->device, &semaphore_info, VK_NULL_HANDLE, &data->render_semaphores[i]) != VK_SUCCESS ||
             vkCreateFence(data->device, &fence_info, VK_NULL_HANDLE, &data->flight_fences[i]) != VK_SUCCESS)
@@ -1755,13 +1775,52 @@ void _purrr_renderer_vulkan_cleanup(_purrr_renderer_t *renderer) {
   free(data);
 }
 
-bool _purrr_renderer_vulkan_begin_frame(_purrr_renderer_t *renderer) {
+uint32_t _purrr_renderer_vulkan_get_sample_counts(_purrr_renderer_t *renderer, purrr_sample_count_t **array) {
+  _purrr_renderer_data_t *data = (_purrr_renderer_data_t*)renderer->data_ptr;
+  assert(renderer->initialized && data);
+
+  VkPhysicalDeviceProperties properties = {0};
+  vkGetPhysicalDeviceProperties(data->gpu, &properties);
+
+  VkSampleCountFlags counts = properties.limits.framebufferColorSampleCounts & properties.limits.framebufferDepthSampleCounts;
+  VkSampleCountFlags save = counts;
+
+  uint32_t n = 0;
+  purrr_sample_count_t *sample_counts = NULL;
+  if (array) {
+    while (save > 0) {
+      if (save & 1) ++n;
+      save >>= 1;
+    }
+
+    sample_counts = malloc(sizeof(*sample_counts) * n);
+    assert(sample_counts);
+    n = 0;
+  }
+
+  uint32_t i = 0;
+  while (counts > 0) {
+    if (counts & 1) {
+      if (array) sample_counts[i] = (purrr_sample_count_t)n;
+      ++i;
+    }
+    counts >>= 1;
+    ++n;
+  }
+
+  if (array) *array = sample_counts;
+
+  return i;
+}
+
+bool _purrr_renderer_vulkan_begin_frame(_purrr_renderer_t *renderer, uint32_t *image_index) {
   _purrr_renderer_data_t *data = (_purrr_renderer_data_t*)renderer->data_ptr;
   assert(renderer->initialized && data);
 
   vkWaitForFences(data->device, 1, &data->flight_fences[data->frame_index], VK_TRUE, UINT64_MAX);
   VkResult result = vkAcquireNextImageKHR(data->device, data->swapchain, UINT64_MAX, data->image_semaphores[data->frame_index], VK_NULL_HANDLE, &data->image_index);
-  if (result == VK_ERROR_OUT_OF_DATE_KHR) return _purrr_renderer_recreate_swapchain(renderer) && _purrr_renderer_vulkan_begin_frame(renderer);
+  if (image_index) *image_index = data->image_index;
+  if (result == VK_ERROR_OUT_OF_DATE_KHR) return _purrr_renderer_recreate_swapchain(renderer) && _purrr_renderer_vulkan_begin_frame(renderer, image_index);
   else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) return false;
 
   vkResetFences(data->device, 1, &data->flight_fences[data->frame_index]);
@@ -1775,8 +1834,6 @@ bool _purrr_renderer_vulkan_begin_frame(_purrr_renderer_t *renderer) {
   };
 
   if (vkBeginCommandBuffer(data->active_cmd_buf, &begin_info) != VK_SUCCESS) return false;
-
-  if (renderer->info.swapchain_render_target) *renderer->info.swapchain_render_target = (purrr_render_target_t*)data->render_targets[data->image_index];
 
   return true;
 }
@@ -1792,8 +1849,9 @@ bool _purrr_renderer_vulkan_begin_render_target(_purrr_renderer_t *renderer, _pu
   VkFramebuffer framebuffer = render_target_data->framebuffer;
 
   uint32_t color_count = render_target->descriptor->info.color_attachment_count;
-  uint32_t clear_value_count = color_count+(render_target->descriptor->info.depth_attachment?1:0);
+  uint32_t clear_value_count = color_count*(render_target->descriptor->info.resolve_attachments?2:1)+(render_target->descriptor->info.depth_attachment?1:0);
   VkClearValue *clear_values = malloc(sizeof(*clear_values)*clear_value_count);
+  assert(clear_values);
 
   VkClearColorValue clear_color = {
     .float32 = { 0.0f, 0.0f, 0.0f, 1.0f } // TODO: Let user decide
@@ -1832,6 +1890,8 @@ bool _purrr_renderer_vulkan_begin_render_target(_purrr_renderer_t *renderer, _pu
 
   vkCmdSetScissor(data->active_cmd_buf, 0, 1, &area);
   data->active_render_target = render_target;
+
+  free(clear_values);
 
   return true;
 }
@@ -1980,8 +2040,6 @@ bool _purrr_renderer_vulkan_end_frame(_purrr_renderer_t *renderer) {
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) _purrr_renderer_recreate_swapchain(renderer);
     else if (result != VK_SUCCESS) return false;
   }
-
-  if (renderer->info.swapchain_render_target) *renderer->info.swapchain_render_target = NULL;
 
   data->active_cmd_buf = NULL;
   data->active_pipeline = NULL;
